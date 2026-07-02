@@ -588,10 +588,9 @@ async function getAssiduite(sheets: Sheets, idEvenement?: string, idPersonne?: s
 // ── LECTURE ATELIERS ──────────────────────────────────────
 
 async function getAteliers(sheets: Sheets, audience?: string) {
-  const [evenements, participants, seances] = await Promise.all([
+  const [evenements, participants] = await Promise.all([
     sheetToObjects(sheets, "EVENEMENT2"),
     sheetToObjects(sheets, "ATELIER_PARTICIPANT"),
-    sheetToObjects(sheets, "SEANCE"),
   ])
   // La table EVENEMENT2 est partagée avec d'autres types d'événements
   // (cours, sortie…) — ce module ne gère que les lignes Type = "atelier".
@@ -600,16 +599,7 @@ async function getAteliers(sheets: Sheets, audience?: string) {
     .filter((a) => !audience || String(a["Audience"]).toLowerCase() === audience.toLowerCase())
     .map((a) => {
       const id = String(a["ID"])
-      // "Atelier ID" d'une séance peut lister plusieurs ateliers (valeurs séparées
-      // par des virgules) — une séance n'est donc pas forcément liée à un seul atelier.
-      const idsSeances = new Set(
-        seances
-          .filter((s) => String(s["Atelier ID"] ?? "").split(",").map((v) => v.trim()).includes(id))
-          .map((s) => String(s["ID"]))
-      )
-      const liens = participants.filter((l) =>
-        String(l["Atelier ID"]) === id || idsSeances.has(String(l["Seance ID"] ?? ""))
-      )
+      const liens = participants.filter((l) => String(l["Atelier ID"]) === id)
       const beneficiaireIds = Array.from(new Set(
         liens
           .filter((l) => l["Role"] === "Beneficiaire")
@@ -1300,8 +1290,6 @@ async function deleteAtelier(sheets: Sheets, idAtelier: string) {
 // matin/après-midi/journée, avec ses propres horaires, salle et intervenants).
 // Un atelier (EVENEMENT2) reste le programme macro ; SEANCE est la table de
 
-
-const SEANCE_HEADERS = ["ID", "Atelier ID", "Date", "Creneau", "Heure Debut", "Heure Fin", "Salle", "Statut"]
 
 /** Reconstruit toujours la ligne complète depuis `data` (même convention que
  *  `atelierRow`) : le formulaire séance doit envoyer l'état complet à chaque
