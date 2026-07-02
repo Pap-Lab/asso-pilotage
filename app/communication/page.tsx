@@ -56,12 +56,12 @@ interface Post {
   titre: string
   brief?: string
   contenu?: string
+  commentaire?: string
   media?: MediaItem[]
   plateforme: Plateforme[]
   plateformeContenu: Partial<Record<Plateforme, PlatformeContent>>
   statut: ValidationStatus
   auteur: string
-  commentaire?: string
   categorieAtelier?: string
   sessionId?: number | null
   participants?: PostParticipants
@@ -373,9 +373,9 @@ function CalendrierTab({ posts, onNewPost, onEdit }: { posts: Post[]; onNewPost:
         {cells.map((day, i) => {
           if (!day) return <div key={i} />
           const isToday = day === today.getDate() && year === today.getFullYear() && month === today.getMonth()
+          const isHovered = hoveredDay === day
           const dayPosts = postsByDay[day] ?? []
           const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
-          const isHovered = hoveredDay === day
           return (
             <div
               key={i}
@@ -390,7 +390,7 @@ function CalendrierTab({ posts, onNewPost, onEdit }: { posts: Post[]; onNewPost:
                   <span className="w-4 h-4 rounded-full bg-slate-900 text-white flex items-center justify-center leading-none text-[10px] font-bold shrink-0">+</span>
                 )}
               </div>
-              {dayPosts.map((p) => {
+              {dayPosts.map((p, pi) => {
                 const Icon = STATUT_ICON[p.statut]
                 const col = i % 7
                 const tooltipSide = col >= 4 ? "right-0" : "left-0"
@@ -538,7 +538,7 @@ const emptyPost = (): Omit<Post, "id"> => ({
   date: new Date().toISOString().split("T")[0],
   titre: "", brief: "", contenu: "", commentaire: "",
   media: [],
-  plateforme: ["Instagram"],
+  plateforme: ["LinkedIn"],
   plateformeContenu: {},
   statut: "brouillon", auteur: "",
   categorieAtelier: "",
@@ -557,12 +557,12 @@ function sheetPostToPost(p: {
   titre: string
   brief?: string
   contenu?: string
+  commentaire?: string
   media: { nom: string; type: string; url?: string }[]
   plateforme: string[]
   plateformeContenu: Record<string, PlatformeContent>
   statut: string
   auteur: string
-  commentaire?: string
   categorieAtelier?: string
   sessionId: number | null
   participants?: PostParticipants
@@ -575,12 +575,12 @@ function sheetPostToPost(p: {
     brief: p.brief ?? "",
     contenu: p.contenu ?? "",
     commentaire: p.commentaire ?? "",
-    categorieAtelier: p.categorieAtelier ?? "",
     media: p.media.map(m => ({ nom: m.nom, type: m.type, url: m.url })),
     plateforme: ALL_PLATEFORMES.filter(pl => (p.plateforme as string[]).includes(pl)),
     plateformeContenu: p.plateformeContenu as Partial<Record<Plateforme, PlatformeContent>>,
     statut: ALL_STATUTS.includes(p.statut as ValidationStatus) ? (p.statut as ValidationStatus) : "brouillon",
     auteur: p.auteur,
+    categorieAtelier: p.categorieAtelier ?? "",
     sessionId: p.sessionId,
     participants: p.participants,
   }
@@ -702,7 +702,7 @@ export default function CommunicationPage() {
     setEditing(null)
     const p = emptyPost()
     setForm(p)
-    setActivePlatformTab(p.plateforme[0] ?? "Instagram")
+    setActivePlatformTab(p.plateforme[0] ?? "LinkedIn")
     setNewFormatrice("")
     setVideoUrl("")
     setGenerateError(null)
@@ -713,7 +713,7 @@ export default function CommunicationPage() {
     setEditing(null)
     const p = { ...emptyPost(), date }
     setForm(p)
-    setActivePlatformTab(p.plateforme[0] ?? "Instagram")
+    setActivePlatformTab(p.plateforme[0] ?? "LinkedIn")
     setNewFormatrice("")
     setVideoUrl("")
     setGenerateError(null)
@@ -725,6 +725,7 @@ export default function CommunicationPage() {
     setForm({
       ...p,
       brief: p.brief ?? "",
+      contenu: p.contenu ?? "",
       commentaire: p.commentaire ?? "",
       categorieAtelier: p.categorieAtelier ?? "",
       plateforme: [...p.plateforme],
@@ -734,9 +735,10 @@ export default function CommunicationPage() {
         ? { ...p.participants, apprenantes: [...p.participants.apprenantes], benevoles: [...p.participants.benevoles], formatrices: [...p.participants.formatrices] }
         : emptyParticipants(),
     })
-    setActivePlatformTab(p.plateforme[0] ?? "Instagram")
+    const videoItem = (p.media ?? []).find(m => m.type === "video")
+    setVideoUrl(videoItem?.url ?? "")
+    setActivePlatformTab(p.plateforme[0] ?? "LinkedIn")
     setNewFormatrice("")
-    setVideoUrl(p.media?.find(m => m.type === "video")?.url ?? "")
     setGenerateError(null)
     setSlideOpen(true)
   }
@@ -883,24 +885,30 @@ export default function CommunicationPage() {
       setForm(f => ({ ...f, categorieAtelier: "", sessionId: null, participants: emptyParticipants() }))
       return
     }
-    const matchingSessions = sessions.filter(s => s.categorie === val)
-
-    const benefIds = new Set<number>()
-    matchingSessions.forEach(s => s.beneficiaireIds.forEach(id => benefIds.add(id)))
-    const apprenantes = [...benefIds]
+    const ids = new Set<number>()
+    sessions.filter(s => s.categorie === val).forEach(s => s.beneficiaireIds.forEach(id => ids.add(id)))
+    const apprenantes = [...ids]
       .map(bid => beneficiaires.find(b => b.id === bid))
       .filter((b): b is BenefSlim => Boolean(b))
       .map(b => ({ id: b.id, prenom: b.prenom, nom: b.nom }))
-
-    const intervIds = new Set<string>()
-    matchingSessions.forEach(s => (s.intervenantIds ?? []).forEach(id => intervIds.add(id)))
-    const formatrices = [...intervIds]
-      .map(iid => intervenants.find(i => i.ID_Intervenant === iid))
+    const intervenantesIds = new Set<string>()
+    sessions.filter(s => s.categorie === val).forEach(s => (s.intervenantIds ?? []).forEach(id => intervenantesIds.add(id)))
+    const formatrices = [...intervenantesIds]
+      .map(id => intervenants.find(i => i.ID_Intervenant === id))
       .filter(Boolean)
-      .map(i => `${i!.Prenom} ${i!.Nom}`.trim())
-
-    setForm(f => ({ ...f, categorieAtelier: val, sessionId: null, participants: { apprenantes, benevoles: f.participants?.benevoles ?? [], formatrices } }))
+      .map(i => `${i!.Prenom} ${i!.Nom}`)
+    setForm(f => ({
+      ...f,
+      categorieAtelier: val,
+      sessionId: null,
+      participants: { apprenantes, benevoles: f.participants?.benevoles ?? [], formatrices },
+    }))
   }
+
+  const categoriesAtelier = useMemo(
+    () => [...new Set(sessions.map(s => s.categorie).filter(Boolean))].sort(),
+    [sessions]
+  )
 
   function removeApprenante(index: number) {
     setForm(f => ({ ...f, participants: { ...f.participants!, apprenantes: f.participants!.apprenantes.filter((_, i) => i !== index) } }))
@@ -959,11 +967,6 @@ export default function CommunicationPage() {
   const aValider       = posts.filter((p) => p.statut === "à valider").length
   const nbPubliesAnnee = posts.filter((p) => p.statut === "publié" && new Date(p.date) >= debutAnnee).length
 
-  const categoriesAtelier = useMemo(
-    () => [...new Set(sessions.map(s => s.categorie).filter(Boolean))].sort(),
-    [sessions]
-  )
-
   const availableBeneficiaires = beneficiaires.filter(b => !form.participants?.apprenantes.some(a => a.id === b.id))
   const availableBenevoles = benevolesMock.liste.filter(bv => !form.participants?.benevoles.includes(bv.nom))
 
@@ -1006,7 +1009,7 @@ export default function CommunicationPage() {
           </FormRow>
 
           {form.categorie === "atelier" && (
-            <Field label="Catégorie d'atelier (optionnel)">
+            <Field label="Catégorie d'atelier">
               <Select value={form.categorieAtelier ?? ""} onChange={e => handleCategorieAtelierChange(e.target.value)}>
                 <option value="">— Sélectionner une catégorie pour importer les participants —</option>
                 {categoriesAtelier.map(cat => <option key={cat} value={cat}>{cat}</option>)}
@@ -1016,23 +1019,20 @@ export default function CommunicationPage() {
               )}
               {form.categorieAtelier && (
                 <p className="text-[11px] text-muted mt-1">
-                  {sessions.filter(s => s.categorie === form.categorieAtelier).length} atelier(s) ·{" "}
-                  {(form.participants?.apprenantes ?? []).length} apprenant(e)(s) ·{" "}
-                  {(form.participants?.formatrices ?? []).length} formateur/trice(s) importé(s)
+                  {sessions.filter(s => s.categorie === form.categorieAtelier).length} atelier(s) · {(form.participants?.apprenantes ?? []).length} participant(s) importé(s)
                 </p>
               )}
             </Field>
           )}
 
-          <Field label="Titre" required>
-            <Input placeholder="Ex: Recap atelier HTML/CSS" value={form.titre} onChange={e => setForm(f => ({ ...f, titre: e.target.value }))} />
+          <Field label="Titre" required hint="ex. Recap atelier HTML/CSS">
+            <Input value={form.titre} onChange={e => setForm(f => ({ ...f, titre: e.target.value }))} />
           </Field>
 
           {form.categorie === "autre" && (
-            <Field label="Brief (contexte pour la génération IA)">
+            <Field label="Brief (contexte pour la génération IA)" hint="Décrivez en quelques mots ce que vous voulez communiquer…">
               <Textarea
                 rows={2}
-                placeholder="Décrivez en quelques mots ce que vous voulez communiquer…"
                 value={form.brief ?? ""}
                 onChange={e => setForm(f => ({ ...f, brief: e.target.value }))}
               />
@@ -1041,7 +1041,7 @@ export default function CommunicationPage() {
 
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-foreground">Contenu principal</span>
+              <span id="contenu-principal-label" className="text-xs font-medium text-foreground">Contenu principal</span>
               <button
                 type="button"
                 onClick={handleGenerate}
@@ -1057,24 +1057,23 @@ export default function CommunicationPage() {
             {generateError && (
               <p className="text-[11px] text-alert bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">{generateError}</p>
             )}
-            <Textarea rows={5} placeholder="Texte du post… ou cliquez sur ✨ Générer avec l'IA" value={form.contenu ?? ""} onChange={e => setForm(f => ({ ...f, contenu: e.target.value }))} />
+            <p id="contenu-principal-hint" className="text-xs text-muted normal-case tracking-normal font-normal -mt-0.5">Texte du post… ou cliquez sur ✨ Générer avec l&apos;IA</p>
+            <Textarea rows={5} aria-labelledby="contenu-principal-label" aria-describedby="contenu-principal-hint" value={form.contenu ?? ""} onChange={e => setForm(f => ({ ...f, contenu: e.target.value }))} />
           </div>
 
-          <Field label="Commentaire interne">
-            <Textarea rows={3} placeholder="Note réservée à l'équipe, non publiée sur les réseaux…" value={form.commentaire ?? ""} onChange={e => setForm(f => ({ ...f, commentaire: e.target.value }))} />
+          <Field label="Commentaire interne" hint="Note interne (non publiée)">
+            <Textarea rows={2} value={form.commentaire ?? ""} onChange={e => setForm(f => ({ ...f, commentaire: e.target.value }))} />
           </Field>
 
           <div className="grid grid-cols-2 gap-4">
-            {/* Image */}
-            <Field label="Image">
+            <Field label="Images">
               <div className="space-y-2">
-                {(form.media ?? []).filter(m => m.type === "image").map((m, _i) => {
-                  const globalIdx = (form.media ?? []).indexOf(m)
-                  const src = m.preview ?? m.url
+                {(form.media ?? []).filter(m => m.type === "image").map((m, i) => {
+                  const realIndex = (form.media ?? []).indexOf(m)
                   return (
-                    <div key={globalIdx} className="relative group w-fit">
-                      {src
-                        ? <img src={src} alt={m.nom} width={64} height={64} loading="lazy" className="h-16 w-16 rounded-lg object-cover border border-border" />
+                    <div key={i} className="relative group inline-block">
+                      {(m.preview ?? m.url)
+                        ? <img src={m.preview ?? m.url} alt={m.nom} width={64} height={64} loading="lazy" className="h-16 w-16 rounded-lg object-cover border border-border" />
                         : <div className="h-16 w-16 rounded-lg border border-border bg-slate-100 flex items-center justify-center text-[10px] text-muted text-center p-1 leading-tight">{m.nom}</div>
                       }
                       {m.uploading && (
@@ -1082,51 +1081,45 @@ export default function CommunicationPage() {
                           <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         </div>
                       )}
-                      <button type="button" onClick={() => removeMedia(globalIdx)} className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button type="button" onClick={() => removeMedia(realIndex)} className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <X size={9} />
                       </button>
                     </div>
                   )
                 })}
                 <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { handleMediaFiles(e.target.files); e.target.value = "" }} />
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center gap-2 text-xs font-medium text-muted border border-dashed border-border rounded-xl px-3 py-3 w-full hover:border-slate-400 hover:text-foreground transition-colors">
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center gap-2 text-xs font-medium text-muted border border-dashed border-border rounded-xl px-3 py-2.5 w-full hover:border-slate-400 hover:text-foreground transition-colors">
                   <Plus size={13} /> Ajouter une image
                 </button>
-                {mediaError && (
-                  <p className="text-[11px] text-alert bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">{mediaError}</p>
-                )}
               </div>
             </Field>
 
-            {/* Vidéo */}
             <Field label="Vidéo (lien de stockage)">
               <div className="space-y-2">
                 <Input
-                  placeholder="https://drive.google.com/…"
                   value={videoUrl}
                   onChange={e => {
                     const url = e.target.value
                     setVideoUrl(url)
                     setForm(f => {
                       const withoutVideo = (f.media ?? []).filter(m => m.type !== "video")
-                      return { ...f, media: url.trim() ? [...withoutVideo, { nom: "Vidéo", type: "video", url: url.trim() }] : withoutVideo }
+                      return { ...f, media: url.trim() ? [...withoutVideo, { nom: "Vidéo", type: "video", url }] : withoutVideo }
                     })
                   }}
+                  placeholder="https://drive.google.com/…"
                 />
-                {videoUrl.trim() && (
-                  <div className="flex items-center gap-2 text-[11px] text-muted">
-                    <span>🎬</span>
-                    <a href={videoUrl} target="_blank" rel="noopener noreferrer" className="truncate underline hover:text-foreground transition-colors">
-                      {videoUrl}
-                    </a>
-                    <button type="button" onClick={() => { setVideoUrl(""); setForm(f => ({ ...f, media: (f.media ?? []).filter(m => m.type !== "video") })) }} className="shrink-0 text-muted hover:text-alert transition-colors">
-                      <X size={11} />
-                    </button>
-                  </div>
+                {videoUrl && (
+                  <button type="button" onClick={() => { setVideoUrl(""); setForm(f => ({ ...f, media: (f.media ?? []).filter(m => m.type !== "video") })) }}
+                    className="flex items-center gap-1 text-[11px] text-alert hover:underline">
+                    <X size={10} /> Retirer la vidéo
+                  </button>
                 )}
               </div>
             </Field>
           </div>
+          {mediaError && (
+            <p className="text-[11px] text-alert bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">{mediaError}</p>
+          )}
 
           <Field label="Plateformes">
             <div className="flex gap-2">
@@ -1155,16 +1148,19 @@ export default function CommunicationPage() {
                 {form.plateforme.includes(activePlatformTab) && (
                   <div className="border border-border rounded-xl p-3 space-y-3 bg-slate-50">
                     <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-muted">Contenu spécifique <span className="font-normal">(optionnel — remplace le contenu principal)</span></label>
-                      <Textarea rows={3} placeholder={`Contenu adapté pour ${activePlatformTab}…`} value={form.plateformeContenu[activePlatformTab]?.contenu ?? ""} onChange={e => updatePlatformeContenu(activePlatformTab, "contenu", e.target.value)} />
+                      <label id="plateforme-contenu-label" className="text-[11px] font-medium text-muted">Contenu spécifique <span className="font-normal">(optionnel — remplace le contenu principal)</span></label>
+                      <p id="plateforme-contenu-hint" className="text-xs text-muted normal-case tracking-normal font-normal -mt-0.5">{`Contenu adapté pour ${activePlatformTab}…`}</p>
+                      <Textarea rows={3} aria-labelledby="plateforme-contenu-label" aria-describedby="plateforme-contenu-hint" value={form.plateformeContenu[activePlatformTab]?.contenu ?? ""} onChange={e => updatePlatformeContenu(activePlatformTab, "contenu", e.target.value)} />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-muted">Tags / Hashtags</label>
-                      <Input placeholder="#association #numérique #formation" value={form.plateformeContenu[activePlatformTab]?.tags ?? ""} onChange={e => updatePlatformeContenu(activePlatformTab, "tags", e.target.value)} />
+                      <label id="plateforme-tags-label" className="text-[11px] font-medium text-muted">Tags / Hashtags</label>
+                      <p id="plateforme-tags-hint" className="text-xs text-muted normal-case tracking-normal font-normal -mt-0.5">ex. #association #numérique #formation</p>
+                      <Input aria-labelledby="plateforme-tags-label" aria-describedby="plateforme-tags-hint" value={form.plateformeContenu[activePlatformTab]?.tags ?? ""} onChange={e => updatePlatformeContenu(activePlatformTab, "tags", e.target.value)} />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-muted">Lien</label>
-                      <Input type="url" placeholder="https://…" value={form.plateformeContenu[activePlatformTab]?.lien ?? ""} onChange={e => updatePlatformeContenu(activePlatformTab, "lien", e.target.value)} />
+                      <label id="plateforme-lien-label" className="text-[11px] font-medium text-muted">Lien</label>
+                      <p id="plateforme-lien-hint" className="text-xs text-muted normal-case tracking-normal font-normal -mt-0.5">ex. https://…</p>
+                      <Input type="url" aria-labelledby="plateforme-lien-label" aria-describedby="plateforme-lien-hint" value={form.plateformeContenu[activePlatformTab]?.lien ?? ""} onChange={e => updatePlatformeContenu(activePlatformTab, "lien", e.target.value)} />
                     </div>
                   </div>
                 )}
@@ -1236,6 +1232,7 @@ export default function CommunicationPage() {
                   <div className="flex gap-2">
                     <input
                       type="text"
+                      aria-label="Nom de l'enseignant·e"
                       placeholder="Nom de l'enseignant·e…"
                       value={newFormatrice}
                       onChange={e => setNewFormatrice(e.target.value)}
@@ -1272,8 +1269,8 @@ export default function CommunicationPage() {
             <Input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
           </Field>
 
-          <Field label="Auteur">
-            <Input placeholder="Nadjat" value={form.auteur} onChange={e => setForm(f => ({ ...f, auteur: e.target.value }))} />
+          <Field label="Auteur" hint="ex. Nadjat">
+            <Input value={form.auteur} onChange={e => setForm(f => ({ ...f, auteur: e.target.value }))} />
           </Field>
 
           {saveError && (
@@ -1327,18 +1324,18 @@ export default function CommunicationPage() {
       ) : (
       <>
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <button onClick={() => setTab("kanban")} className="bg-slate-100 rounded-xl border border-slate-200 p-4 text-left hover:bg-slate-200 transition-colors cursor-pointer">
+        <div className="bg-slate-100 rounded-xl border border-slate-200 p-4">
           <p className="text-3xl font-bold text-slate-700">{nbBrouillons}</p>
           <p className="text-sm text-slate-500 mt-1">En cours de rédaction</p>
-        </button>
-        <button onClick={() => setTab("kanban")} className="bg-absences-light rounded-xl border border-absences/20 p-4 text-left hover:opacity-80 transition-opacity cursor-pointer">
+        </div>
+        <div className="bg-absences-light rounded-xl border border-absences/20 p-4">
           <p className="text-3xl font-bold text-absences-dark">{aValider}</p>
           <p className="text-sm text-absences-dark/70 mt-1">À valider</p>
-        </button>
-        <button onClick={() => setTab("kanban")} className="bg-emerald-50 rounded-xl border border-emerald-200 p-4 text-left hover:bg-emerald-100 transition-colors cursor-pointer">
+        </div>
+        <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4">
           <p className="text-3xl font-bold text-emerald-700">{nbPubliesAnnee}</p>
           <p className="text-sm text-emerald-600/70 mt-1">Publiés en {currentYear}</p>
-        </button>
+        </div>
       </div>
 
       <div className="flex gap-1 mb-6 bg-slate-100 p-1 rounded-lg w-fit">

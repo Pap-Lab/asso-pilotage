@@ -508,22 +508,34 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
             const ouvert = openDocTypes.includes(cat)
             return (
               <li key={cat}>
-                {/* Ligne du type : cliquable (dépliage) uniquement s'il y a des fichiers */}
-                <div
-                  role={present ? "button" : undefined}
-                  onClick={present ? () => setOpenDocTypes(o => o.includes(cat) ? o.filter(c => c !== cat) : [...o, cat]) : undefined}
-                  className={`flex items-center justify-between gap-3 py-2.5 ${present ? "cursor-pointer" : ""}`}
-                >
-                  <span className="flex items-center gap-1.5 text-sm text-foreground">
-                    {present
-                      ? <ChevronDown size={15} className={`shrink-0 text-muted transition-transform ${ouvert ? "" : "-rotate-90"}`} />
-                      : <span className="w-[15px] shrink-0" />}
-                    {cat}
-                  </span>
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${present ? "bg-finances-light text-finances-dark" : "bg-slate-100 text-slate-500"}`}>
-                    {present ? "Oui" : "Non"}
-                  </span>
-                </div>
+                {/* Ligne du type : bouton dépliable (accessible clavier) s'il y a des fichiers, sinon simple ligne */}
+                {(() => {
+                  const contenu = (
+                    <>
+                      <span className="flex items-center gap-1.5 text-sm text-foreground">
+                        {present
+                          ? <ChevronDown size={15} className={`shrink-0 text-muted transition-transform ${ouvert ? "" : "-rotate-90"}`} />
+                          : <span className="w-[15px] shrink-0" />}
+                        {cat}
+                      </span>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${present ? "bg-finances-light text-finances-dark" : "bg-slate-100 text-slate-500"}`}>
+                        {present ? "Oui" : "Non"}
+                      </span>
+                    </>
+                  )
+                  return present ? (
+                    <button
+                      type="button"
+                      aria-expanded={ouvert}
+                      onClick={() => setOpenDocTypes(o => o.includes(cat) ? o.filter(c => c !== cat) : [...o, cat])}
+                      className="w-full flex items-center justify-between gap-3 py-2.5 cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-familles"
+                    >
+                      {contenu}
+                    </button>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3 py-2.5">{contenu}</div>
+                  )
+                })()}
 
                 {/* Fichiers rattachés à ce type (dépliés) */}
                 {present && ouvert && (
@@ -778,18 +790,18 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               <option value="Terminale CAP">Terminale CAP</option>
             </Select>
           </Field>
-          <Field label="Disponibilités">
-            <Input value={String(reinscForm.Disponibilite ?? "")} onChange={e => setReinscForm(f => ({ ...f, Disponibilite: e.target.value }))} placeholder="ex. Lundi matin, Mercredi" />
+          <Field label="Disponibilités" hint="ex. Lundi matin, Mercredi">
+            <Input value={String(reinscForm.Disponibilite ?? "")} onChange={e => setReinscForm(f => ({ ...f, Disponibilite: e.target.value }))} />
           </Field>
-          <Field label="Orientation">
-            <Input value={String(reinscForm.Orientation ?? "")} onChange={e => setReinscForm(f => ({ ...f, Orientation: e.target.value }))} placeholder="ex. CAF, CPAM…" />
+          <Field label="Orientation" hint="ex. CAF, CPAM…">
+            <Input value={String(reinscForm.Orientation ?? "")} onChange={e => setReinscForm(f => ({ ...f, Orientation: e.target.value }))} />
           </Field>
           <FormRow>
-            <Field label="Montant d'adhésion (€)">
-              <Input type="number" value={String(reinscForm.Montant_Adhesion ?? "")} onChange={e => setReinscForm(f => ({ ...f, Montant_Adhesion: e.target.value }))} placeholder="0" />
+            <Field label="Montant d'adhésion (€)" hint="ex. 0">
+              <Input type="number" value={String(reinscForm.Montant_Adhesion ?? "")} onChange={e => setReinscForm(f => ({ ...f, Montant_Adhesion: e.target.value }))} />
             </Field>
-            <Field label="Montant d'inscription (€)">
-              <Input type="number" value={String(reinscForm.Montant_Inscription ?? "30")} onChange={e => setReinscForm(f => ({ ...f, Montant_Inscription: e.target.value }))} placeholder="30" />
+            <Field label="Montant d'inscription (€)" hint="ex. 30">
+              <Input type="number" value={String(reinscForm.Montant_Inscription ?? "30")} onChange={e => setReinscForm(f => ({ ...f, Montant_Inscription: e.target.value }))} />
             </Field>
           </FormRow>
           <div className="px-3 py-2.5 rounded-xl bg-slate-50 border border-border text-sm text-muted">
@@ -818,11 +830,10 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               <option value="Terminé">Terminé</option>
             </Select>
           </Field>
-          <Field label="Remarque">
+          <Field label="Remarque" hint="Motif, observations…">
             <Textarea
               value={finForm.Remarques}
               onChange={e => setFinForm(f => ({ ...f, Remarques: e.target.value }))}
-              placeholder="Motif, observations…"
             />
           </Field>
           <SaveButton accent="familles" />
@@ -857,8 +868,8 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
           )}
           {/* Champs modifiables */}
           <FormRow>
-            <Field label="Année scolaire">
-              <Input value={inscForm.Annee_Scolaire} onChange={e => setInscForm(f => ({ ...f, Annee_Scolaire: e.target.value }))} placeholder="2024-2025" />
+            <Field label="Année scolaire" hint="ex. 2024-2025">
+              <Input value={inscForm.Annee_Scolaire} onChange={e => setInscForm(f => ({ ...f, Annee_Scolaire: e.target.value }))} />
             </Field>
             <Field label="Type d'apprenant">
               <Select value={inscForm.Type_Apprenant} onChange={e => setInscForm(f => ({ ...f, Type_Apprenant: e.target.value }))}>
@@ -882,18 +893,18 @@ export default function FicheMembrePage({ params }: { params: Promise<{ id: stri
               <option value="Terminale CAP">Terminale CAP</option>
             </Select>
           </Field>
-          <Field label="Disponibilités">
-            <Input value={inscForm.Disponibilite} onChange={e => setInscForm(f => ({ ...f, Disponibilite: e.target.value }))} placeholder="ex. Lundi matin, Mercredi" />
+          <Field label="Disponibilités" hint="ex. Lundi matin, Mercredi">
+            <Input value={inscForm.Disponibilite} onChange={e => setInscForm(f => ({ ...f, Disponibilite: e.target.value }))} />
           </Field>
-          <Field label="Orientation">
-            <Input value={inscForm.Orientation} onChange={e => setInscForm(f => ({ ...f, Orientation: e.target.value }))} placeholder="ex. CAF, CPAM…" />
+          <Field label="Orientation" hint="ex. CAF, CPAM…">
+            <Input value={inscForm.Orientation} onChange={e => setInscForm(f => ({ ...f, Orientation: e.target.value }))} />
           </Field>
           <FormRow>
-            <Field label="Montant d'adhésion (€)">
-              <Input type="number" value={inscForm.Montant_Adhesion} onChange={e => setInscForm(f => ({ ...f, Montant_Adhesion: e.target.value }))} placeholder="0" />
+            <Field label="Montant d'adhésion (€)" hint="ex. 0">
+              <Input type="number" value={inscForm.Montant_Adhesion} onChange={e => setInscForm(f => ({ ...f, Montant_Adhesion: e.target.value }))} />
             </Field>
-            <Field label="Montant d'inscription (€)">
-              <Input type="number" value={inscForm.Montant_Inscription} onChange={e => setInscForm(f => ({ ...f, Montant_Inscription: e.target.value }))} placeholder="30" />
+            <Field label="Montant d'inscription (€)" hint="ex. 30">
+              <Input type="number" value={inscForm.Montant_Inscription} onChange={e => setInscForm(f => ({ ...f, Montant_Inscription: e.target.value }))} />
             </Field>
           </FormRow>
           <div className="px-3 py-2.5 rounded-xl bg-slate-50 border border-border text-sm text-muted">
