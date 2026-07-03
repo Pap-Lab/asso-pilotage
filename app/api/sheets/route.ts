@@ -3,7 +3,7 @@ import { getServerUser } from "@/lib/supabase/server"
 import {
   getSheetsClient, SPREADSHEET_ID,
   sheetToObjects, appendRow, updateRowById, deleteRowById, deleteRowsWhere, deleteRowsWhereAll, nextId, fmtDate, parseDateFr, ensureColumn, ensureColumns,
-  uploadToDrive, getHeaders, deleteDriveFile, makeFilePublic, COMMUNICATION_MEDIA_FOLDER_ID, BILAN_ATELIER_FOLDER_ID, createOrGetFolder,
+  uploadToDrive, getHeaders, deleteDriveFile, makeFilePublic, COMMUNICATION_MEDIA_FOLDER_ID, createOrGetFolder, BILAN_ATELIER_FOLDER_ID,
 } from "@/lib/google-sheets-server"
 import { niveauEcole } from "@/lib/atelier"
 
@@ -67,6 +67,14 @@ export async function GET(request: NextRequest) {
         return ok(await getEvaluations(sheets))
       case "getRecapEleves":
         return ok({ rows: await computeRecapEleves(sheets) })
+      case "getEtablissements":
+        return ok(await getEtablissements(sheets))
+      case "getProfesseurs":
+        return ok(await getProfesseurs(sheets, searchParams.get("idEtab") ?? ""))
+      case "getEtablissementsAvecStats":
+        return ok(await getEtablissementsAvecStats(sheets))
+      case "getEtablissementDetail":
+        return ok(await getEtablissementDetail(sheets, searchParams.get("idEtab")!))
       default:
         return err(`Action inconnue : ${action}`)
     }
@@ -114,6 +122,11 @@ export async function POST(request: NextRequest) {
       case "deleteIntervenant": return ok(await deleteIntervenant(sheets, body.idIntervenant))
       case "upsertEvaluation":  return ok(await upsertEvaluation(sheets, String(body.idPersonne), body.session, body.data))
       case "deleteEvaluation":  return ok(await deleteEvaluation(sheets, body.idEvaluation))
+      case "addEtablissement":    return ok(await addEtablissement(sheets, body.data))
+      case "deleteEtablissement": return ok(await deleteEtablissement(sheets, body.idEtab))
+      case "addProfesseur":       return ok(await addProfesseur(sheets, body.data))
+      case "deleteProfesseur":    return ok(await deleteProfesseur(sheets, body.idProf))
+      case "addScolarite":        return ok(await addScolariteEntry(sheets, body))
       case "uploadFichier":   return ok(await uploadFichier(sheets, body))
       case "deleteDocument":  return ok(await deleteDocument(sheets, body.idDoc))
       case "addPost":         return ok(await addPost(sheets, body.data))
@@ -376,20 +389,26 @@ function sanitizeDriveName(s: string, max = 80): string {
 }
 
 async function uploadPostMedia(body: Record<string, unknown>) {
-  const originalNom = String(body.nom ?? "media")
   const mimeType = String(body.mimeType ?? "application/octet-stream")
   const dataBase64 = String(body.dataBase64 ?? "")
   if (!dataBase64) return { error: "Fichier vide" }
+
   const titre = body.titre ? sanitizeDriveName(String(body.titre)) : ""
   const date = body.date ? String(body.date).slice(0, 10) : ""
-  const isImage = mimeType.startsWith("image/")
-  const ext = originalNom.includes(".") ? originalNom.slice(originalNom.lastIndexOf(".")) : ""
-  const nomFichier = titre ? `${titre} - ${originalNom}` : originalNom
+
+  // Déterminer le dossier cible : sous-dossier par post si titre fourni, sinon dossier racine
   let folderId = COMMUNICATION_MEDIA_FOLDER_ID
   if (titre && date) {
     const nomDossier = sanitizeDriveName(`${date} - ${titre}`)
     folderId = await createOrGetFolder(nomDossier, COMMUNICATION_MEDIA_FOLDER_ID)
   }
+
+  // Nommer le fichier : {titre} - {nom original} pour garantir l'unicité quand plusieurs
+  // images sont uploadées dans le même sous-dossier de post.
+  const isImage = mimeType.startsWith("image/")
+  const originalNom = sanitizeDriveName(String(body.nom ?? "media"))
+  const nomFichier = titre ? `${titre} - ${originalNom}` : originalNom
+
   const { fileId, url: webViewLink } = await uploadToDrive(nomFichier, mimeType, dataBase64, folderId)
   await makeFilePublic(fileId)
   const url = isImage ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600` : webViewLink
@@ -485,6 +504,8 @@ async function getScolariteFamille(sheets: Sheets, idFamille: string) {
         ID_Membre: String(sc["Personne ID"]),
         Nom: String(p?.["Nom"] ?? ""),
         Prenom: String(p?.["Prenom"] ?? ""),
+        Etablissement_ID: String(sc["Etablissement ID"] ?? ""),
+        Prof_ID: String(sc["Prof principal ID"] ?? ""),
         Etablissement: etab ? { Type: String(etab["Type"] ?? ""), Nom: String(etab["Nom"] ?? "") } : null,
         ProfPrincipal: prof
           ? { Nom: String(prof["Nom"] ?? ""), Telephone: String(prof["Telephone"] ?? ""), Email: String(prof["Email"] ?? "") }
@@ -619,7 +640,7 @@ async function getAteliers(sheets: Sheets, audience?: string) {
         .map((l) => ({
           ID_Intervenant: String(l["Intervenant ID"]),
           Heures: l["Heures"] ?? "",
-          Role: "",
+          Role: l["Fonction"] ?? "",
         }))
       const competences = String(a["Competences ciblees"] ?? "")
         .split(",").map((s) => s.trim()).filter(Boolean)
@@ -639,7 +660,6 @@ async function getAteliers(sheets: Sheets, audience?: string) {
         Salle: a["Salle"] ?? "",
         Mode_Groupage: a["Mode groupage"] ?? "",
         Taille_Cible: a["Taille cible"] ?? "",
-        Ratio_Encadrement: a["Ratio encadrement"] ?? "",
         Competences_Ciblees: competences,
         Taches: a["Taches"] ?? "",
         Besoins: a["Besoins"] ?? "",
@@ -1233,7 +1253,7 @@ async function syncAtelierLiens(
     await deleteRowsWhereAll(sheets, "ATELIER_PARTICIPANT", { "Atelier ID": String(idAtelier), "Role": "Intervenant" })
     for (const iid of intervenantIds) {
       const rid = await nextId(sheets, "ATELIER_PARTICIPANT")
-      await appendRow(sheets, "ATELIER_PARTICIPANT", { "ID": rid, "Atelier ID": idAtelier, "Intervenant ID": iid, "Role": "Intervenant", "Heures": "" })
+      await appendRow(sheets, "ATELIER_PARTICIPANT", { "ID": rid, "Atelier ID": idAtelier, "Intervenant ID": iid, "Role": "Intervenant", "Heures": "", "Fonction": "" })
     }
   }
 }
@@ -1255,7 +1275,6 @@ function atelierRow(data: Record<string, unknown>): Record<string, unknown> {
     "Salle": data.Salle ?? "",
     "Mode groupage": data.Mode_Groupage ?? "",
     "Taille cible": data.Taille_Cible ?? "",
-    "Ratio encadrement": data.Ratio_Encadrement ?? "",
     "Competences ciblees": joinList(data.Competences_Ciblees, ","),
     "Taches": joinList(data.Taches, "\n"),
     "Besoins": joinList(data.Besoins, "\n"),
@@ -1321,6 +1340,23 @@ async function deleteAtelier(sheets: Sheets, idAtelier: string) {
 // auto-référence), et "Séance ID" est l'auto-référence de la séance elle-même
 // (utilisée par ATELIER_PARTICIPANT/ASSIDUITE pour s'y rattacher).
 
+// Durée d'une séance calculée depuis ses horaires début/fin (HH:MM).
+function minutesFromHeures(heureDebut: unknown, heureFin: unknown): number {
+  const [h1, m1] = String(heureDebut ?? "").split(":").map(Number)
+  const [h2, m2] = String(heureFin ?? "").split(":").map(Number)
+  if ([h1, m1, h2, m2].some((n) => isNaN(n))) return 0
+  const mins = (h2 * 60 + m2) - (h1 * 60 + m1)
+  return mins > 0 ? mins : 0
+}
+
+function formatMinutes(mins: number): string {
+  if (mins <= 0) return ""
+  const rounded = Math.round(mins)
+  const h = Math.floor(rounded / 60)
+  const m = rounded % 60
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`
+}
+
 /** Reconstruit toujours la ligne complète depuis `data` (même convention que
  *  `atelierRow`) : le formulaire séance doit envoyer l'état complet à chaque
  *  sauvegarde, pas un diff partiel — sinon les champs absents sont effacés. */
@@ -1384,6 +1420,7 @@ async function syncSeanceIntervenants(
       "Intervenant ID": entry.ID_Intervenant,
       "Role": "Intervenant",
       "Heures": entry.Heures ?? "",
+      "Fonction": "",
     })
   }
 }
@@ -1432,8 +1469,8 @@ interface RecapEleveRow {
   vacances: string
   combienDeGroupe: number
   combienDeSeances: number
-  dureeChaqueSeance: string
-  heuresParEleve: string
+  dureeChaqueSeance: number
+  heuresParEleve: number
   nElèves: number
   elementaire6e: number
   collegeLycee: number
@@ -1463,20 +1500,10 @@ function anneeScolaireFromIso(iso: string): string {
   return `${String(baseYear % 100).padStart(2, "0")}-${String((baseYear + 1) % 100).padStart(2, "0")}`
 }
 
-function minutesFromHeures(heureDebut: unknown, heureFin: unknown): number {
-  const [h1, m1] = String(heureDebut ?? "").split(":").map(Number)
-  const [h2, m2] = String(heureFin ?? "").split(":").map(Number)
-  if ([h1, m1, h2, m2].some((n) => isNaN(n))) return 0
-  const mins = (h2 * 60 + m2) - (h1 * 60 + m1)
-  return mins > 0 ? mins : 0
-}
-
-function formatMinutes(mins: number): string {
-  if (mins <= 0) return ""
-  const rounded = Math.round(mins)
-  const h = Math.floor(rounded / 60)
-  const m = rounded % 60
-  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`
+/** Durée en heures décimales (ex. 90 → 1.5) — format numérique pour
+ *  permettre les calculs côté Google Sheet, contrairement à formatMinutes(). */
+function minutesToHeures(mins: number): number {
+  return Math.round((mins / 60) * 100) / 100
 }
 
 async function computeRecapEleves(sheets: Sheets): Promise<RecapEleveRow[]> {
@@ -1620,8 +1647,8 @@ async function computeRecapEleves(sheets: Sheets): Promise<RecapEleveRow[]> {
       vacances: periode,
       combienDeGroupe: atelierIds.length,
       combienDeSeances: nbSeancesMoyen,
-      dureeChaqueSeance: formatMinutes(dureeMoyenneMin),
-      heuresParEleve: formatMinutes(average(heuresParEleveIndiv)),
+      dureeChaqueSeance: minutesToHeures(dureeMoyenneMin),
+      heuresParEleve: minutesToHeures(average(heuresParEleveIndiv)),
       nElèves: beneficiaireIds.size,
       elementaire6e,
       collegeLycee,
@@ -1680,6 +1707,157 @@ async function exportRecapEleves(sheets: Sheets) {
 
   const { url } = await uploadToDrive(nomFichier, "text/csv", base64, BILAN_ATELIER_FOLDER_ID)
   return { ok: true, url, nomFichier }
+}
+
+// ── ÉTABLISSEMENT / PROFESSEUR / SCOLARITE ────────────────
+
+async function getEtablissements(sheets: Sheets) {
+  const rows = await sheetToObjects(sheets, "ETABLISSEMENT")
+  return rows.map(r => ({ ID: String(r["ID"]), Type: String(r["Type"] ?? ""), Nom: String(r["Nom"] ?? "") }))
+}
+
+async function getProfesseurs(sheets: Sheets, idEtab: string) {
+  const rows = await sheetToObjects(sheets, "PROFESSEUR")
+  return rows
+    .filter(r => !idEtab || String(r["Etablissement ID"]) === idEtab)
+    .map(r => ({ ID: String(r["ID"]), Nom: String(r["Nom"] ?? ""), Telephone: String(r["Telephone"] ?? ""), Email: String(r["Email"] ?? "") }))
+}
+
+async function addEtablissement(sheets: Sheets, data: Record<string, unknown>) {
+  const id = await nextId(sheets, "ETABLISSEMENT")
+  await appendRow(sheets, "ETABLISSEMENT", { "ID": id, "Type": data.Type ?? "", "Nom": data.Nom ?? "" })
+  return { ok: true, ID: String(id) }
+}
+
+async function addProfesseur(sheets: Sheets, data: Record<string, unknown>) {
+  const id = await nextId(sheets, "PROFESSEUR")
+  await appendRow(sheets, "PROFESSEUR", {
+    "ID": id, "Nom": data.Nom ?? "", "Telephone": data.Telephone ?? "",
+    "Email": data.Email ?? "", "Etablissement ID": data.Etablissement_ID ?? "",
+  })
+  return { ok: true, ID: String(id) }
+}
+
+async function getEtablissementsAvecStats(sheets: Sheets) {
+  const [etabs, profs, scolarites, personnes] = await Promise.all([
+    sheetToObjects(sheets, "ETABLISSEMENT"),
+    sheetToObjects(sheets, "PROFESSEUR"),
+    sheetToObjects(sheets, "SCOLARITE"),
+    sheetToObjects(sheets, "PERSONNE"),
+  ])
+  return etabs.map(e => {
+    const idEtab = String(e["ID"])
+    const scolEtab = scolarites.filter(s => String(s["Etablissement ID"]) === idEtab)
+    const idsEnfants = new Set(scolEtab.map(s => String(s["Personne ID"])))
+    const idsFamilles = new Set(
+      personnes.filter(p => idsEnfants.has(String(p["ID"]))).map(p => String(p["Famille ID"]))
+    )
+    const nbAdultes = personnes.filter(
+      p => idsFamilles.has(String(p["Famille ID"])) && String(p["Categorie"]) !== "Enfant"
+    ).length
+    const nbProfs = profs.filter(p => String(p["Etablissement ID"]) === idEtab).length
+    return {
+      ID: idEtab,
+      Type: String(e["Type"] ?? ""),
+      Nom: String(e["Nom"] ?? ""),
+      nb_enfants: idsEnfants.size,
+      nb_adultes: nbAdultes,
+      nb_professeurs: nbProfs,
+    }
+  })
+}
+
+async function getEtablissementDetail(sheets: Sheets, idEtab: string) {
+  const [etabs, profs, scolarites, personnes, inscriptions] = await Promise.all([
+    sheetToObjects(sheets, "ETABLISSEMENT"),
+    sheetToObjects(sheets, "PROFESSEUR"),
+    sheetToObjects(sheets, "SCOLARITE"),
+    sheetToObjects(sheets, "PERSONNE"),
+    sheetToObjects(sheets, "INSCRIPTION"),
+  ])
+  const etab = etabs.find(e => String(e["ID"]) === idEtab)
+  const profById = new Map(profs.map(p => [String(p["ID"]), p]))
+  const scolEtab = scolarites.filter(s => String(s["Etablissement ID"]) === idEtab)
+  const eleves = scolEtab.map(sc => {
+    const p = personnes.find(x => String(x["ID"]) === String(sc["Personne ID"]))
+    const prof = profById.get(String(sc["Prof principal ID"] ?? ""))
+    const insc = inscriptions.filter(i => String(i["Personne ID"]) === String(sc["Personne ID"]))
+    const dernInsc = insc.length > 0 ? insc[insc.length - 1] : null
+    return {
+      ID_Membre: String(sc["Personne ID"]),
+      ID_Famille: String(p?.["Famille ID"] ?? ""),
+      Nom: String(p?.["Nom"] ?? ""),
+      Prenom: String(p?.["Prenom"] ?? ""),
+      Niveau: String(dernInsc?.["Niveau / Classe"] ?? ""),
+      ProfPrincipal: prof ? {
+        Nom: String(prof["Nom"] ?? ""),
+        Telephone: String(prof["Telephone"] ?? ""),
+        Email: String(prof["Email"] ?? ""),
+      } : null,
+    }
+  })
+  const professeurs = profs
+    .filter(p => String(p["Etablissement ID"]) === idEtab)
+    .map(p => ({
+      ID: String(p["ID"]),
+      Nom: String(p["Nom"] ?? ""),
+      Telephone: String(p["Telephone"] ?? ""),
+      Email: String(p["Email"] ?? ""),
+    }))
+  return {
+    ID: idEtab,
+    Type: String(etab?.["Type"] ?? ""),
+    Nom: String(etab?.["Nom"] ?? ""),
+    eleves,
+    professeurs,
+  }
+}
+
+async function deleteEtablissement(sheets: Sheets, idEtab: string) {
+  // Cascade : nettoie les références à cet établissement dans PROFESSEUR et SCOLARITE
+  // avant de supprimer la ligne ETABLISSEMENT elle-même.
+  // PROFESSEUR : supprime les profs liés (ils n'ont pas de sens sans établissement)
+  await deleteRowsWhere(sheets, "PROFESSEUR", "Etablissement ID", [String(idEtab)])
+  // SCOLARITE : efface l'établissement et le prof principal sur les lignes qui le référencent
+  const scolarites = await sheetToObjects(sheets, "SCOLARITE")
+  for (const sc of scolarites) {
+    if (String(sc["Etablissement ID"]) === String(idEtab)) {
+      await updateRowById(sheets, "SCOLARITE", String(sc["ID"]), {
+        "Etablissement ID": "", "Prof principal ID": "",
+      })
+    }
+  }
+  const deleted = await deleteRowById(sheets, "ETABLISSEMENT", idEtab)
+  return deleted ? { ok: true } : { error: "Établissement introuvable" }
+}
+
+async function deleteProfesseur(sheets: Sheets, idProf: string) {
+  // Cascade : efface la référence au prof dans toutes les lignes SCOLARITE qui le mentionnent
+  const scolarites = await sheetToObjects(sheets, "SCOLARITE")
+  for (const sc of scolarites) {
+    if (String(sc["Prof principal ID"]) === String(idProf)) {
+      await updateRowById(sheets, "SCOLARITE", String(sc["ID"]), { "Prof principal ID": "" })
+    }
+  }
+  const deleted = await deleteRowById(sheets, "PROFESSEUR", idProf)
+  return deleted ? { ok: true } : { error: "Professeur introuvable" }
+}
+
+async function addScolariteEntry(sheets: Sheets, body: Record<string, unknown>) {
+  const idMembre = String(body.idMembre ?? "")
+  const scolarites = await sheetToObjects(sheets, "SCOLARITE")
+  const existing = scolarites.find(s => String(s["Personne ID"]) === idMembre)
+  const champs: Record<string, unknown> = {
+    "Etablissement ID": body.idEtab ?? "", "Prof principal ID": body.idProf ?? "",
+  }
+  if (body.rencontre !== undefined) champs["Rencontre prof"] = body.rencontre
+  if (existing) {
+    await updateRowById(sheets, "SCOLARITE", String(existing["ID"]), champs)
+  } else {
+    const id = await nextId(sheets, "SCOLARITE")
+    await appendRow(sheets, "SCOLARITE", { "ID": id, "Personne ID": idMembre, ...champs })
+  }
+  return { ok: true }
 }
 
 // ── Helpers mapping ───────────────────────────────────────

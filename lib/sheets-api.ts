@@ -181,6 +181,8 @@ export interface ScolariteEntry {
   ID_Membre: string
   Nom: string
   Prenom: string
+  Etablissement_ID: string
+  Prof_ID: string
   Etablissement: { Type: string; Nom: string } | null
   ProfPrincipal: { Nom: string; Telephone: string; Email: string } | null
   Autorisation_Sortie: string
@@ -317,6 +319,64 @@ export async function uploadPostMedia(data: {
   date?: string
 }): Promise<{ ok: boolean; url: string; fileId: string }> {
   return apiPost({ action: "uploadPostMedia", ...data }) as Promise<{ ok: boolean; url: string; fileId: string }>
+}
+
+// ── Établissements / Professeurs / Scolarité ───
+
+export interface EtablissementItem { ID: string; Type: string; Nom: string }
+export interface ProfesseurItem    { ID: string; Nom: string; Telephone: string; Email: string }
+
+export interface EtablissementStats {
+  ID: string; Type: string; Nom: string
+  nb_enfants: number; nb_adultes: number; nb_professeurs: number
+}
+
+export interface EleveEtablissement {
+  ID_Membre: string; ID_Famille: string
+  Nom: string; Prenom: string; Niveau: string
+  ProfPrincipal: { Nom: string; Telephone: string; Email: string } | null
+}
+
+export interface EtablissementDetailSheet {
+  ID: string; Type: string; Nom: string
+  eleves: EleveEtablissement[]
+  professeurs: ProfesseurItem[]
+}
+
+export async function fetchEtablissementsAvecStats(): Promise<EtablissementStats[]> {
+  return apiGet("getEtablissementsAvecStats") as Promise<EtablissementStats[]>
+}
+
+export async function fetchEtablissementDetail(idEtab: string): Promise<EtablissementDetailSheet> {
+  return apiGet("getEtablissementDetail", { idEtab }) as Promise<EtablissementDetailSheet>
+}
+
+export async function fetchEtablissements(): Promise<EtablissementItem[]> {
+  return apiGet("getEtablissements") as Promise<EtablissementItem[]>
+}
+
+export async function fetchProfesseurs(idEtab: string): Promise<ProfesseurItem[]> {
+  return apiGet("getProfesseurs", { idEtab }) as Promise<ProfesseurItem[]>
+}
+
+export async function addEtablissement(data: { Type: string; Nom: string }): Promise<{ ok: boolean; ID: string }> {
+  return apiPost({ action: "addEtablissement", data }) as Promise<{ ok: boolean; ID: string }>
+}
+
+export async function addProfesseur(data: { Nom: string; Telephone: string; Email: string; Etablissement_ID: string }): Promise<{ ok: boolean; ID: string }> {
+  return apiPost({ action: "addProfesseur", data }) as Promise<{ ok: boolean; ID: string }>
+}
+
+export async function deleteEtablissement(idEtab: string): Promise<{ ok: boolean }> {
+  return apiPost({ action: "deleteEtablissement", idEtab }) as Promise<{ ok: boolean }>
+}
+
+export async function deleteProfesseur(idProf: string): Promise<{ ok: boolean }> {
+  return apiPost({ action: "deleteProfesseur", idProf }) as Promise<{ ok: boolean }>
+}
+
+export async function addScolarite(idMembre: string, idEtab: string, idProf: string, rencontre?: string): Promise<{ ok: boolean }> {
+  return apiPost({ action: "addScolarite", idMembre, idEtab, idProf, rencontre }) as Promise<{ ok: boolean }>
 }
 
 // ── Indicateur de configuration ────────────────
